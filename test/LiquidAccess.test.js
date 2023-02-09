@@ -27,7 +27,7 @@ describe("Contract: LiquidAccess", () => {
         liquidAccess = await LiquidAccess.deploy("LiquidAccess", "LQD", "Merchant", 42);
         mint = (uri = 'ipfs://S9332fa/some') => liquidAccess.connect(minter).safeMint(owner.address, uri);
         batchMint = (recipients = [owner, wallet1, wallet2, owner, wallet3].map(s => s.address),
-                     uris = [1, 2, 3, 4, 5].map(i => `ipfs://S9332fa/${i}`)) => 
+                     uris = [1, 2, 3, 4, 5].map(i => `ipfs://S9332fa/${i}`)) =>
             liquidAccess.connect(minter).batchMint(recipients, uris);
         const assignMinterRoleTx = await liquidAccess.grantRole(await liquidAccess.MINTER_ROLE(), minter.address)
         await assignMinterRoleTx.wait()
@@ -45,11 +45,11 @@ describe("Contract: LiquidAccess", () => {
 
     describe("Merchant info", () => {
         it("should return merchant name", async () => {
-            expect(await liquidAccess.merchantName()).to.equal("Merchant");
+            expect(await liquidAccess._merchantName()).to.equal("Merchant");
         });
 
         it("should return merchant id", async () => {
-            expect(await liquidAccess.merchantId()).to.equal(42);
+            expect(await liquidAccess._merchantId()).to.equal(42);
         });
     });
 
@@ -234,7 +234,7 @@ describe("Contract: LiquidAccess", () => {
                 const r = "0x" + signature.substring(0, 64);
                 const s = "0x" + signature.substring(64, 128);
                 const v = parseInt(signature.substring(128, 130), 16);
-    
+
                 return liquidAccess.connect(wallet3).permit(
                     permitData.owner, permitData.spender, permitData.tokenId, permitData.deadline, permitData.nonce,
                     v, r, s);
@@ -308,7 +308,7 @@ describe("Contract: LiquidAccess", () => {
 
             await liquidAccess.connect(wallet3).permit(
                 permitData.owner, permitData.spender, permitData.tokenId, permitData.deadline, permitData.nonce,
-                v2, r2, s2);            
+                v2, r2, s2);
         })
 
         it("should check the deadline", async () => {
@@ -476,7 +476,7 @@ describe("Contract: LiquidAccess", () => {
             await liquidAccess.transferFrom(owner.address, wallet2.address, 1);
         })
     });
-            
+
 
     describe("Royalty", async () => {
         it("should return 2.5% royalty by default", async () => {
@@ -539,7 +539,7 @@ describe("Contract: LiquidAccess", () => {
             await mint();
             await mint();
             await mint();
-            
+
             await liquidAccess.addNFTToBlacklist(1);
             await liquidAccess.addNFTToBlacklist(3);
 
