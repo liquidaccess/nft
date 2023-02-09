@@ -24,26 +24,26 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
     /// @notice MAX_LOCKUP_PERIOD is hardcoded in the contract and can not be changed.
     ///         But owner can set _lockupPeriod, the actual value to something between
     ///         0 and MAX_LOCKUP_PERIOD.
-    uint256 public constant MAX_LOCKUP_PERIOD = 30 days;
-    uint256 private _lockupPeriod;  // duration of lockup period in seconds
+    uint256 public immutable MAX_LOCKUP_PERIOD = 30 days;
+    uint256 public _lockupPeriod;  // duration of lockup period in seconds
     mapping(uint256 => uint256) private _lockups;  // locked up until timestamp
 
 
-    string private _merchantName; // Merchant name
-    uint256 private _merchantId; // Merchant id
+    string public _merchantName; // Merchant name
+    uint256 public immutable _merchantId; // Merchant id
     string private _contractName;
     string private _contractDescription;
     string private _contractImage;
 
 
-    uint256 private _tranferFromCounter; // TransferFrom counter
+    uint256 public _tranferFromCounter; // TransferFrom counter
 
 
-    mapping(address => bool) private addressBlacklist; // Black list (user)
-    mapping(uint256 => bool) private nftBlacklist; // Black list (nft)
+    mapping(address => bool) public bannedUsersList;
+    mapping(uint256 => bool) public frozenNFTList;
 
 
-    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    bytes32 public immutable MINTER_ROLE = keccak256("MINTER_ROLE");
 
     uint256 public _nextTokenId;
 
@@ -70,12 +70,12 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
         uint256 indexed current
     );
 
-    event NftBlacklist(
+    event NftFrozen(
         uint256 indexed tokenId,
         bool indexed status
     );
 
-    event AddressBlacklist(
+    event AddressBanned(
         address indexed user,
         bool indexed status
     );
@@ -95,18 +95,60 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
         string indexed current
     );
 
-    error AfterDeadline(uint256 providedDeadline, uint256 currentTime);
+    // ============================================
+    // Errors section
+    // ============================================
+
+    error AfterDeadline(
+        uint256 providedDeadline,
+        uint256 currentTime
+    );
+
     error ApproveToOwner();
-    error HolderIsBlacklisted(address holder);
-    error NFTisBlacklisted(uint256 tokenId);
-    error NotOwner(address who, address expectedOwner, uint256 tokenId);
-    error PeriodTooLong(uint256 providedPeriod, uint256 allowedPeriod);
-    error RecipientIsBlacklisted(address recipient);
-    error TokenIdNotFound(uint256 tokenId);
-    error TransferIsLocked(uint256 lockedUntil, uint256 currentTime);
+
+    error HolderIsBanned(
+        address holder
+    );
+
+    error NFTisFrozen(
+        uint256 tokenId
+    );
+
+    error NotOwner(
+        address who,
+        address expectedOwner,
+        uint256 tokenId
+    );
+
+    error PeriodTooLong(
+        uint256 providedPeriod,
+        uint256 allowedPeriod
+    );
+
+    error RecipientIsBanned(
+        address recipient
+    );
+
+    error TokenIdNotFound(
+        uint256 tokenId
+    );
+
+    error TransferIsLocked(
+        uint256 lockedUntil,
+        uint256 currentTime
+    );
+
     error WrongInputs();
-    error WrongNonce(uint256 providedNonce, uint256 currentNonce);
-    error WrongSigner(address expected, address actual);
+
+    error WrongNonce(
+        uint256 providedNonce,
+        uint256 currentNonce
+    );
+
+    error WrongSigner(
+        address expected,
+        address actual
+    );
 
     // ============================================
     // Modifiers section
@@ -127,7 +169,8 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
         string memory merchantName_,
         uint256 merchantId_
     ) ERC721(name_, symbol_)
-      EIP712(name_, "1.0") {
+      EIP712(name_, "1.0")
+    {
         _merchantName = merchantName_;
         _merchantId = merchantId_;
 
@@ -173,48 +216,6 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
             return 0;
         }
         return lockup - block.timestamp;
-    }
-
-    /// @dev could be external but used in tests, thus public
-    function lockupPeriod()
-        public
-        view
-        returns (uint256)
-    {
-        return _lockupPeriod;
-    }
-
-    function isNFTBlacklisted(uint256 tokenId)
-        external
-        view
-        tokenExists(tokenId)
-        returns (bool)
-    {
-        return nftBlacklist[tokenId];
-    }
-
-    function isAddressBlacklisted(address _address)
-        external
-        view
-        returns (bool)
-    {
-        return addressBlacklist[_address];
-    }
-
-    function merchantName()
-        external
-        view
-        returns (string memory)
-    {
-        return _merchantName;
-    }
-
-    function merchantId()
-        external
-        view
-        returns (uint256)
-    {
-        return _merchantId;
     }
 
     function userTokens(address user)
@@ -322,7 +323,7 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
     /// @notice Generates a series of new NFTs and places it to recipient's accounts
     /// @dev Here we are using _mint, and not a _safeMint. Because _safeMint checks onERC721Received,
     ///      so the malitious user can place some contract which does some bad actions,
-    ///      i.e. reverts and stops mint, adds theirs blacklisted addresses etc.
+    ///      i.e. reverts and stops mint, adds theirs blocked addresses etc.
     function batchMint(
         address[] calldata recipients,
         string[] calldata uris
@@ -334,12 +335,12 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
 
         uint256 tokenId = _nextTokenId;
         for (uint16 i = 0; i < recipients.length; ) {
-            if (!addressBlacklist[recipients[i]]) {
+            if (!bannedUsersList[recipients[i]]) {
                 _mint(recipients[i], tokenId);
                 _setTokenURI(tokenId, uris[i]);
             }
             // Yes, there will be some gaps in tokenIds, when users are providing
-            // blacklisted addresses. This is needed because uris are representing
+            // blocked addresses. This is needed because uris are representing
             // already generated JSON's and assumes that all previous mints in a batch
             // are successful.
             unchecked {
@@ -369,38 +370,38 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
         _lockupPeriod = period;
     }
 
-    function addNFTToBlacklist(uint256 _nft)
+    function freezeNft(uint256 _nft)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
         tokenExists(_nft)
     {
-        nftBlacklist[_nft] = true;
-        emit NftBlacklist(_nft, true);
+        frozenNFTList[_nft] = true;
+        emit NftFrozen(_nft, true);
     }
 
-    function removeNFTFromBlacklist(uint256 _nft)
+    function unfreezeNft(uint256 _nft)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
         tokenExists(_nft)
     {
-        delete nftBlacklist[_nft];
-        emit NftBlacklist(_nft, false);
+        delete frozenNFTList[_nft];
+        emit NftFrozen(_nft, false);
     }
 
-    function addAddressToBlacklist(address _address)
+    function banUser(address _address)
         public
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
-        addressBlacklist[_address] = true;
-        emit AddressBlacklist(_address, true);
+        bannedUsersList[_address] = true;
+        emit AddressBanned(_address, true);
     }
 
-    function removeAddressFromBlacklist(address _address)
+    function unbanUser(address _address)
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
-        delete addressBlacklist[_address];
-        emit AddressBlacklist(_address, false);
+        delete bannedUsersList[_address];
+        emit AddressBanned(_address, false);
     }
 
     /// @dev Emits update showing that metadata for all tokens was updated.
@@ -454,17 +455,17 @@ contract LiquidAccess is ERC165, ERC721Burnable, ERC721Enumerable, ERC721URIStor
 
         // Transfer or burn
         if (from != address(0)) {
-            if (addressBlacklist[from]) revert HolderIsBlacklisted(from);
+            if (bannedUsersList[from]) revert HolderIsBanned(from);
         }
 
         // Mint or transfer
         if (to != address(0)) {
-            if (addressBlacklist[to]) revert RecipientIsBlacklisted(to);
+            if (bannedUsersList[to]) revert RecipientIsBanned(to);
         }
 
         // A transfer
         if (from != address(0) && to != address(0)) {
-            if (nftBlacklist[tokenId]) revert NFTisBlacklisted(tokenId);
+            if (frozenNFTList[tokenId]) revert NFTisFrozen(tokenId);
             
             uint256 lockup = _lockups[tokenId];
             if (lockup != 0 && block.timestamp < lockup) {
